@@ -434,6 +434,40 @@ class OrderViewSet(viewsets.ModelViewSet):
         serializer = OrderSerializer(order, context={'request': request})
         return Response(serializer.data)
 
+    @action(detail=True, methods=['delete'], permission_classes=[IsAdminOrReadOnly])
+    def admin_delete(self, request, pk=None):
+        """Admin permanently deletes any order."""
+        if not request.user.is_superuser:
+            return Response({'error': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
+        order = self.get_object()
+        order_id = order.order_id
+        order.delete()
+        logger.info(f"[ORDER DELETED] Admin {request.user.username} permanently deleted order {order_id}")
+        return Response({'status': 'deleted', 'order_id': order_id})
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAdminOrReadOnly])
+    def admin_archive(self, request, pk=None):
+        """Admin archives any order regardless of status."""
+        if not request.user.is_superuser:
+            return Response({'error': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
+        order = self.get_object()
+        order.is_archived = True
+        order.save(update_fields=['is_archived'])
+        logger.info(f"[ORDER ARCHIVED] Admin {request.user.username} archived order {order.order_id}")
+        serializer = OrderSerializer(order, context={'request': request})
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAdminOrReadOnly])
+    def admin_unarchive(self, request, pk=None):
+        """Admin unarchives an order."""
+        if not request.user.is_superuser:
+            return Response({'error': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
+        order = self.get_object()
+        order.is_archived = False
+        order.save(update_fields=['is_archived'])
+        serializer = OrderSerializer(order, context={'request': request})
+        return Response(serializer.data)
+
 from .models import Cart, CartItem
 from .serializers import CartSerializer, CartItemSerializer
 

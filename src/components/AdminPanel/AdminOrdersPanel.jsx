@@ -2,14 +2,14 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ShoppingBag, Search, X, CheckCircle, Truck, XCircle, Clock,
-  RefreshCw, ChevronDown, User, MapPin, Package, Eye, ZoomIn, ZoomOut, RotateCcw, Smartphone
+  RefreshCw, ChevronDown, User, MapPin, Package, Eye, ZoomIn, ZoomOut, RotateCcw, Smartphone, Archive, Trash2
 } from 'lucide-react';
 import axios from 'axios';
 import { toast } from 'react-hot-toast';
 import { useAdminAuth } from '../../router/AdminAuthContext';
 
 const API = '/api';
-const STATUSES = ['All', 'Pending', 'Approved', 'Shipped', 'Delivered', 'Rejected', 'Cancelled'];
+const STATUSES = ['All', 'Pending', 'Approved', 'Shipped', 'Delivered', 'Rejected', 'Cancelled', 'Archived'];
 
 const STATUS_META = {
   Pending:   { color: '#F97316', bg: 'rgba(249,115,22,0.1)',  border: 'rgba(249,115,22,0.3)',  icon: Clock        },
@@ -18,6 +18,7 @@ const STATUS_META = {
   Delivered: { color: '#22C55E', bg: 'rgba(34,197,94,0.1)',   border: 'rgba(34,197,94,0.3)',   icon: CheckCircle  },
   Rejected:  { color: '#EF4444', bg: 'rgba(239,68,68,0.1)',   border: 'rgba(239,68,68,0.3)',   icon: XCircle      },
   Cancelled: { color: '#EF4444', bg: 'rgba(239,68,68,0.1)',   border: 'rgba(239,68,68,0.3)',   icon: XCircle      },
+  Archived:  { color: '#FCD34D', bg: 'rgba(251,191,36,0.1)',  border: 'rgba(251,191,36,0.3)',  icon: Archive      },
 };
 
 function getMeta(s) { return STATUS_META[s] || STATUS_META.Pending; }
@@ -34,13 +35,16 @@ function StatusBadge({ status }) {
 }
 
 // ─── Order Detail Drawer ───────────────────────────────────────────────────────
-function OrderDetailDrawer({ order, onClose, onStatusUpdate, adminToken }) {
+function OrderDetailDrawer({ order, onClose, onStatusUpdate, onArchive, onDelete, adminToken }) {
   const [newStatus, setNewStatus] = useState(order.status);
   const [trackingNumber, setTrackingNumber] = useState(order.tracking_number || '');
   const [adminNotes, setAdminNotes] = useState(order.admin_notes || '');
   const [updating, setUpdating] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
   const [zoomScale, setZoomScale] = useState(1);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const ACTION_BUTTONS = [
     { status: 'Approved',  label: 'Approve Order',  color: '#A855F7', bg: 'rgba(168,85,247,0.15)', border: 'rgba(168,85,247,0.4)', icon: CheckCircle },
@@ -67,6 +71,42 @@ function OrderDetailDrawer({ order, onClose, onStatusUpdate, adminToken }) {
       toast.error('Failed to update refund status.');
     } finally {
       setUpdatingRefund(false);
+    }
+  };
+
+  const handleAdminArchive = async () => {
+    setArchiving(true);
+    try {
+      const endpoint = order.is_archived ? 'admin_unarchive' : 'admin_archive';
+      const res = await axios.post(
+        `${API}/orders/${order.id}/${endpoint}/`,
+        {},
+        { headers: { Authorization: `Bearer ${adminToken}` } }
+      );
+      onArchive(res.data);
+      toast.success(order.is_archived ? 'Order unarchived.' : 'Order archived.');
+    } catch {
+      toast.error('Failed to update archive status.');
+    } finally {
+      setArchiving(false);
+    }
+  };
+
+  const handleAdminDelete = async () => {
+    setDeleting(true);
+    try {
+      await axios.delete(
+        `${API}/orders/${order.id}/admin_delete/`,
+        { headers: { Authorization: `Bearer ${adminToken}` } }
+      );
+      onDelete(order.id);
+      toast.success('Order permanently deleted.');
+      onClose();
+    } catch {
+      toast.error('Failed to delete order.');
+    } finally {
+      setDeleting(false);
+      setShowDeleteConfirm(false);
     }
   };
 
@@ -109,6 +149,12 @@ function OrderDetailDrawer({ order, onClose, onStatusUpdate, adminToken }) {
           </div>
           <div className="flex items-center gap-3">
             <StatusBadge status={newStatus} />
+            {order.is_archived && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-semibold uppercase tracking-wide"
+                style={{ background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.25)', color: '#FCD34D' }}>
+                <Archive size={10} /> Archived
+              </span>
+            )}
             <button onClick={onClose} className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
               style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
               <X size={18} />
@@ -322,6 +368,53 @@ function OrderDetailDrawer({ order, onClose, onStatusUpdate, adminToken }) {
             </div>
           )}
 
+          {/* ── Admin Danger Zone ── */}
+          <div className="p-5 rounded-xl space-y-3" style={{ background: 'rgba(239,68,68,0.04)', border: '1px solid rgba(239,68,68,0.15)' }}>
+            <p className="text-xs uppercase font-semibold tracking-widest" style={{ color: 'rgba(239,68,68,0.6)' }}>Admin Actions</p>
+            <div className="flex gap-3">
+              <button
+                onClick={handleAdminArchive}
+                disabled={archiving}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-semibold text-sm transition-all duration-200"
+                style={{ background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.2)', color: '#FCD34D', opacity: archiving ? 0.7 : 1 }}
+              >
+                <Archive size={14} />
+                {archiving ? 'Working...' : order.is_archived ? 'Unarchive' : 'Archive Order'}
+              </button>
+              <button
+                onClick={() => setShowDeleteConfirm(true)}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-semibold text-sm transition-all duration-200"
+                style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#FCA5A5' }}
+              >
+                <Trash2 size={14} />
+                Delete Order
+              </button>
+            </div>
+            {showDeleteConfirm && (
+              <div className="p-4 rounded-xl" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)' }}>
+                <p className="text-sm font-bold text-red-300 mb-1">⚠️ Permanently delete this order?</p>
+                <p className="text-xs mb-4" style={{ color: 'rgba(239,68,68,0.5)' }}>This cannot be undone. All order data will be lost forever.</p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleAdminDelete}
+                    disabled={deleting}
+                    className="flex-1 py-2 rounded-lg text-sm font-bold text-white transition-all"
+                    style={{ background: '#EF4444', opacity: deleting ? 0.7 : 1 }}
+                  >
+                    {deleting ? 'Deleting...' : 'Yes, Delete Forever'}
+                  </button>
+                  <button
+                    onClick={() => setShowDeleteConfirm(false)}
+                    className="flex-1 py-2 rounded-lg text-sm font-semibold transition-colors"
+                    style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.6)' }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
         </div>
       </motion.div>
 
@@ -423,15 +516,28 @@ export default function AdminOrdersPanel({ isOpen, onClose }) {
     if (selectedOrder?.id === updatedOrder.id) setSelectedOrder(updatedOrder);
   };
 
+  const handleOrderArchive = (updatedOrder) => {
+    setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+    if (selectedOrder?.id === updatedOrder.id) setSelectedOrder(updatedOrder);
+  };
+
+  const handleOrderDelete = (orderId) => {
+    setOrders(prev => prev.filter(o => o.id !== orderId));
+    setSelectedOrder(null);
+  };
+
   const filtered = orders.filter(o => {
-    const matchStatus = filterStatus === 'All' || o.status === filterStatus;
     const q = search.toLowerCase();
     const matchSearch = !q || o.order_id?.toLowerCase().includes(q) || o.full_name?.toLowerCase().includes(q) || o.phone?.includes(q);
-    return matchStatus && matchSearch;
+    if (filterStatus === 'Archived') return o.is_archived && matchSearch;
+    const matchStatus = filterStatus === 'All' || o.status === filterStatus;
+    return !o.is_archived && matchStatus && matchSearch;
   });
 
   const counts = STATUSES.reduce((acc, s) => {
-    acc[s] = s === 'All' ? orders.length : orders.filter(o => o.status === s).length;
+    if (s === 'Archived') acc[s] = orders.filter(o => o.is_archived).length;
+    else if (s === 'All') acc[s] = orders.filter(o => !o.is_archived).length;
+    else acc[s] = orders.filter(o => !o.is_archived && o.status === s).length;
     return acc;
   }, {});
 
@@ -552,6 +658,12 @@ export default function AdminOrdersPanel({ isOpen, onClose }) {
                   </div>
                   <div className="flex flex-col items-end gap-2 flex-shrink-0">
                     <StatusBadge status={order.status} />
+                    {order.is_archived && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold"
+                        style={{ background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.2)', color: '#FCD34D' }}>
+                        <Archive size={9} /> Archived
+                      </span>
+                    )}
                     <span className="text-xs text-violet-400/60 group-hover:text-violet-400 transition-colors">View Details →</span>
                   </div>
                 </div>
@@ -568,6 +680,8 @@ export default function AdminOrdersPanel({ isOpen, onClose }) {
             order={selectedOrder}
             onClose={() => setSelectedOrder(null)}
             onStatusUpdate={handleStatusUpdate}
+            onArchive={handleOrderArchive}
+            onDelete={handleOrderDelete}
             adminToken={token}
           />
         )}
